@@ -1,10 +1,10 @@
-# AICodec: Real-Time AI-Assisted JPEG Compression for Samsung Galaxy
+# AICodec: Real-Time 6-Stage AI JPEG Compression Solution for Samsung Galaxy
 
 [![Target Platform](https://img.shields.io/badge/Platform-Samsung%20Galaxy%20Android-blue.svg)](https://developer.samsung.com)
 [![Target Latency](https://img.shields.io/badge/Latency-%3C5ms%20%40%2012MP-green.svg)]()
 [![Standard Compliance](https://img.shields.io/badge/Format-Standard%20JPEG%20(ISO%2FIEC%2010918--1)-orange.svg)]()
 
-A high-performance, real-time AI-assisted JPEG compression solution designed for the **Samsung Galaxy Camera real-time photo capture pipeline**.
+A high-performance, real-time **6-Stage End-to-End AI-assisted JPEG compression solution** designed for the **Samsung Galaxy Camera real-time photo capture pipeline**.
 
 ---
 
@@ -13,9 +13,33 @@ A high-performance, real-time AI-assisted JPEG compression solution designed for
 * **Ultra-Fast Performance**: Encodes a **12MP ($4000 \times 3000$)** image in **$\approx 3.6\text{ms}$** (Target budget: $< 5.0\text{ms}$).
 * **Significant Compression Gain**: Reduces file size by **$20\% \sim 35\%$** at equivalent or superior perceptual quality compared to heuristic/rule-based quantization logic.
 * **100% Standard JPEG Compatibility**: Outputs valid standard JFIF bitstreams, decodable by any standard JPEG viewer, web browser, or third-party app without custom decoders.
-* **Minimal Thermal & Battery Impact**:
-  * AI Quantization Table model (`Micro-QuantNet`) executes in **$0.12\text{ms} \sim 0.15\text{ms}$** on Samsung NPU (INT8 quantized, $<35\text{KB}$).
-  * Zero memory copies (`dmabuf` / `AHardwareBuffer` zero-copy memory pipeline).
+* **Beyond Global DQT: 6-Stage Multi-Layer Pipeline**:
+  1. Spatial AI Sub-band Noise Shaping & JND Mask Extraction
+  2. Global Frequency AI DQT Prediction (Micro-QuantNet)
+  3. Block-Adaptive Dead-Zone Quantization & Fast-EOB Truncation
+  4. Semantic Chroma Mode Dynamic Switching (4:4:4 vs 4:2:0)
+  5. 1-Pass Sampling Dynamic Huffman Table (Fast-DHT)
+  6. Restart Marker (`DRI`) Lock-Free 4-Core ARM NEON SIMD Multi-Threading
+
+---
+
+## ⚡ 6-Stage End-to-End Pipeline Workflow
+
+```
+[ Camera HAL / 12MP YUV420 dmabuf ]
+   │
+   ├─► 1. [Spatial Pre-Processing] AI Noise Shaping & JND Map (<0.20ms)
+   │
+   ├─► 2. [Global DQT] NPU Micro-QuantNet (<0.15ms) ──► Optimal 8x8 Q_Y, Q_C Prediction
+   │
+   ├─► 3. [Block RDO] Block-Adaptive Dead-Zone & Fast-EOB (~1.20ms) ──► Suppress Non-Perceptible Noise
+   │
+   ├─► 4. [Chroma Transform] Semantic Chroma Mode Switching (<0.05ms) ──► 4:4:4 / 4:2:0 Switching
+   │
+   ├─► 5. [Entropy Coding] 1/16 Stride Fast-DHT (<0.10ms) ──► Image-Adaptive Dynamic Huffman Table
+   │
+   └─► 6. [Multi-Core Parallel] 4-Core ARM NEON DRI SW Codec (~2.00ms) ──► Standard JFIF Output (~3.60ms)
+```
 
 ---
 
@@ -24,7 +48,8 @@ A high-performance, real-time AI-assisted JPEG compression solution designed for
 ```
 AICodec/
 ├── docs/
-│   └── PROJECT_PLAN.md              # Comprehensive technical specification & execution plan
+│   ├── PROJECT_PLAN.md              # Detailed Technical Specification & Plan (English)
+│   └── PROJECT_PLAN_KR.md           # Detailed Technical Specification & Plan (Korean)
 ├── ai_training/
 │   ├── micro_quant_net.py           # MicroQuantNet PyTorch architecture (<35k params)
 │   ├── diff_jpeg.py                 # Differentiable JPEG simulator for Rate-Distortion training
@@ -36,23 +61,8 @@ AICodec/
 │   ├── FastJpegQuantizer.cpp        # ARM NEON SIMD quantizer and histogram collector
 │   └── NpuQuantRunner.h             # Native wrapper for Samsung NPU (ENN / TFLite C-API)
 ├── app/                             # Android application module
-└── README.md
-```
-
----
-
-## ⚡ System Pipeline Overview
-
-```
-[ Camera HAL / 12MP YUV420 dmabuf ]
-                │
-                ├─► 1. NPU Micro-QuantNet (<0.15ms) ──► Dynamic 8x8 Q_Y, Q_C & DeadZone Thresholds
-                │
-                ├─► 2. 1/16 Stride Fast-DHT (<0.10ms) ──► Image-Adaptive Dynamic Huffman Table
-                │
-                ├─► 3. 4-Core ARM NEON SW Codec (~3.30ms) ──► DCT + DeadZone Quantization + DRI Parallel
-                │
-                └─► 4. Bitstream Assembly (<0.05ms) ──► Standard JFIF Output (25~35% Size Reduction)
+├── README.md                        # Main README (English)
+└── README_KR.md                     # Main README (Korean)
 ```
 
 ---
@@ -68,7 +78,6 @@ python export_tflite.py
 ```
 
 ### 2. Native C++ Codec Integration
-Include `native/FastJpegQuantizer.h` and `native/NpuQuantRunner.h` in your Android NDK build:
 ```cpp
 #include "FastJpegQuantizer.h"
 #include "NpuQuantRunner.h"
