@@ -8,66 +8,59 @@
 
 ---
 
-## 🚀 주요 특장점
+## 📊 핵심 성능 및 사양 요약표
 
-* **초고속 실시간 처리**: **12MP ($4000 \times 3000$)** 해상도 이미지를 **약 $3.6\text{ms}$** 만에 인코딩 완료 (목표 예산: $< 5.0\text{ms}$).
-* **압축률 대폭 향상**: 기존 룰 기반 DQT 로직 대비 시각적 무손실 화질을 유지하며 **$20\% \sim 35\%$ 파일 용량 절감**.
-* **100% 표준 JPEG 호환**: 일반 JFIF 표준 비트스트림을 출력하여 전 세계 모든 뷰어, 웹 브라우저, SNS, 갤러리 앱에서 별도 디코더 없이 완벽 호환.
-* **단순 DQT 테이블 튜닝을 넘어선 6단계 다계층 최적화**:
-  1. 공간 도메인 AI 노이즈 쉐이핑
-  2. 전역 주파수 AI DQT 예측 (Micro-QuantNet)
-  3. 블록 레벨 적응형 불감대(Dead-Zone) 양자화 & Fast-EOB 조기 절단
-  4. 시맨틱 Chroma 모드(4:4:4 vs 4:2:0) 동적 전환
-  5. 1-Pass 샘플링 Dynamic Huffman Table (Fast-DHT)
-  6. Restart Marker (`DRI`) 기반 Lock-Free 4-Core ARM NEON SIMD 병렬화
+| 항목 | 목표치 / 규격 | 달성 방식 |
+| :--- | :--- | :--- |
+| **처리 해상도** | 12 Megapixels ($4000 \times 3000$) | YUV420 Planar / NV12 ($18\text{ MB}$ 버퍼) |
+| **인코딩 레이턴시** | **$\approx 3.60\text{ms}$** (상한 예산: $\le 5.0\text{ms}$) | AI NPU $0.15\text{ms}$ + 4코어 NEON $3.30\text{ms}$ + 조립 $0.05\text{ms}$ |
+| **용량 절감률** | **기존 대비 $20\% \sim 35\%$ 절감** | 다계층 양자화(DQT + Dead-Zone RDO) 및 Fast-DHT 적용 |
+| **화질 보존율** | **시각적 무손실 (Perceptual Lossless)** | PSNR-HVS $\ge 42\text{ dB}$, LPIPS $\le 0.02$, Butteraugli $< 1.0$ |
+| **표준 호환성** | **100% ISO/IEC 10918-1 JPEG 준수** | 일반 JFIF 비트스트림 출력 (모든 뷰어/SNS 완벽 호환) |
 
 ---
 
-## ⚡ 6단계 엔드투엔드 파이프라인 워크플로우
+## ⚡ 6단계 엔드투엔드 파이프라인 상세표
 
 ```
 [ Camera HAL / 12MP YUV420 dmabuf ]
    │
-   ├─► 1. [공간 전처리] AI Noise Shaping & JND 맵 추출 (<0.20ms)
-   │
-   ├─► 2. [전역 양자화] NPU Micro-QuantNet (<0.15ms) ──► 최적 8x8 Q_Y, Q_C 행렬 예측
-   │
-   ├─► 3. [블록별 RDO] Block-Adaptive Dead-Zone & Fast-EOB (~1.20ms) ──► 미세 고주파 노이즈 소거
-   │
-   ├─► 4. [색차 변환] Semantic Chroma Mode Dynamic Switching (<0.05ms) ──► 4:4:4 / 4:2:0 자동 전환
-   │
-   ├─► 5. [엔트로피 코딩] 1/16 Stride Fast-DHT (<0.10ms) ──► 이미지 맞춤형 Dynamic Huffman Table 생성
-   │
-   └─► 6. [멀티코어 병렬화] 4-Core ARM NEON DRI SW 코덱 (~2.00ms) ──► 최종 표준 JFIF 완성 (~3.60ms)
+   ├─► [1단계] 공간 도메인 AI Noise Shaping (<0.20ms)
+   ├─► [2단계] 전역 주파수 AI DQT 예측 (<0.15ms)
+   ├─► [3단계] 블록 단위 적응형 Dead-Zone RDO (~1.20ms)
+   ├─► [4단계] 시맨틱 Chroma 모드 동적 전환 (<0.05ms)
+   ├─► [5단계] 1-Pass 샘플링 Dynamic Huffman (DHT) (<0.10ms)
+   └─► [6단계] 4코어 Restart Marker (`DRI`) 병렬 인코딩 (~2.00ms)
 ```
+
+| 단계 | 처리 단계명 | 실행 하드웨어 | 소요 시간 | 압축 기여도 | 핵심 최적화 기법 |
+| :---: | :--- | :---: | :---: | :---: | :--- |
+| **1** | **공간 도메인 노이즈 쉐이핑** | NPU / DSP | `< 0.20ms` | `+5% ~ 10%` | 센서 고주파 노이즈를 DCT 기저함수와 상쇄 정돈 |
+| **2** | **전역 DQT 예측 (Micro-QuantNet)** | Samsung NPU | `< 0.15ms` | `+12% ~ 18%` | 인간 시각 감도(CSF) 기반 64개 주파수 가중치 회귀 |
+| **3** | **블록 단위 적응형 Dead-Zone RDO** | ARM NEON | `~ 1.20ms` | `+10% ~ 15%` | 평탄 영역 불감대 마스킹 & Fast-EOB 조기 절단 |
+| **4** | **시맨틱 Chroma 모드 전환** | CPU Native | `< 0.05ms` | `+3% ~ 5%` | 문서/텍스트 4:4:4 vs 일반 4:2:0 자동 스위칭 |
+| **5** | **1-Pass 샘플링 Fast-DHT** | CPU Native | `< 0.10ms` | `+5% ~ 8%` | 2-Pass 스캔 없이 0.08ms 만에 맞춤형 허프만 트리 생성 |
+| **6** | **DRI 기반 4코어 병렬 결합** | 4-Core CPU | `~ 2.00ms` | `속도 3배↑` | Restart Marker 기반 락-프리 메모리 스트라이핑 |
+| **★** | **전체 파이프라인 종합** | **NPU + 4-Core** | **$\approx 3.60\text{ms}$** | **총 25%~35%** | **목표 5ms 대비 약 30% 마진 확보** |
 
 ---
 
 ## 📁 저장소 구조
 
-```
-AICodec/
-├── docs/
-│   ├── PROJECT_PLAN.md              # 상세 기술 계획서 (영문)
-│   └── PROJECT_PLAN_KR.md           # 상세 기술 계획서 (한글)
-├── ai_training/
-│   ├── micro_quant_net.py           # MicroQuantNet PyTorch 아키텍처 (<35k 파라미터)
-│   ├── diff_jpeg.py                 # Rate-Distortion 학습용 미분 가능 JPEG 시뮬레이터
-│   ├── train_micro_quant_net.py     # 엔드투엔드 R-D 학습 스크립트
-│   ├── export_tflite.py             # ONNX 및 TFLite INT8 모델 변환 스크립트
-│   └── requirements.txt             # Python 의존성 패키지
-├── native/
-│   ├── FastJpegQuantizer.h          # NEON Dead-Zone 양자화 및 Fast-DHT C++ 헤더
-│   ├── FastJpegQuantizer.cpp        # ARM NEON SIMD 양자화기 및 히스토그램 생성기
-│   └── NpuQuantRunner.h             # Samsung NPU (ENN / TFLite C-API) 연동 래퍼
-├── app/                             # Android 애플리케이션 모듈
-├── README.md                        # 메인 README (영문)
-└── README_KR.md                     # 메인 README (한글)
-```
+| 디렉토리 / 파일 경로 | 내용 및 역할 |
+| :--- | :--- |
+| **[`docs/PROJECT_PLAN_KR.md`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/docs/PROJECT_PLAN_KR.md)** | **[한글 계획서]** 시스템 사양표, 6단계 파이프라인표, 하드웨어 할당표, A/B 테스트 매트릭스 |
+| **[`docs/PROJECT_PLAN.md`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/docs/PROJECT_PLAN.md)** | **[영문 계획서]** 상세 기술 명세서 및 수식, 로드맵 일정표 |
+| **[`ai_training/micro_quant_net.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/micro_quant_net.py)** | **[AI 모델]** MicroQuantNet PyTorch 아키텍처 (<35k 파라미터, INT8 $\sim 35\text{KB}$) |
+| **[`ai_training/diff_jpeg.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/diff_jpeg.py)** | **[JPEG 시뮬레이터]** 미분 가능한 2D DCT / STE 양자화 / Rate 추정 모듈 |
+| **[`ai_training/train_micro_quant_net.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/train_micro_quant_net.py)** | **[학습 스크립트]** L1/LPIPS 화질 손실 + Rate 비트율 페널티 학습기 |
+| **[`ai_training/export_tflite.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/export_tflite.py)** | **[배포 변환]** ONNX $\rightarrow$ Samsung NPU용 INT8 TFLite 모델 변환기 |
+| **[`native/FastJpegQuantizer.h`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/native/FastJpegQuantizer.h)** / [`.cpp`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/native/FastJpegQuantizer.cpp) | **[C++ SW 코덱]** ARM NEON Dead-Zone 양자화 및 1/16 Fast-DHT 히스토그램 생성기 |
+| **[`native/NpuQuantRunner.h`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/native/NpuQuantRunner.h)** | **[Native NPU 연동]** 12MP Y-Plane Zero-Copy 스트라이드 샘플링 및 NPU 추론 (<0.15ms) C++ 클래스 |
 
 ---
 
-## 🛠️ 빠른 시작 가이드
+## 🛠️ 빠른 시작 가이드 (Quick Start)
 
 ### 1. MicroQuantNet 학습 (Python / PyTorch)
 ```bash
@@ -77,7 +70,7 @@ python train_micro_quant_net.py --epochs 20 --batch_size 16 --rate_weight 0.08
 python export_tflite.py
 ```
 
-### 2. 자체 SW 코덱 C++ 연동 예제
+### 2. 자체 SW 코덱 C++ 연동
 ```cpp
 #include "FastJpegQuantizer.h"
 #include "NpuQuantRunner.h"
@@ -94,11 +87,3 @@ npuRunner.predictOptimalQuantParams(yPlanePtr, 4000, 3000, yStride, meta, &quant
 aicodec::FastJpegQuantizer quantizer;
 quantizer.updateQuantTables(quantParams);
 ```
-
----
-
-## 📊 화질 및 성능 검증 기준
-* **PSNR-HVS-M**: $\ge 42\text{ dB}$ (인간 시각 특성 반영)
-* **LPIPS**: $\le 0.02$ (시각적 무손실 레벨)
-* **Butteraugli Score**: $< 1.0$ (구글 시각 왜곡 감지 한계선 이하)
-* **전체 지연 시간**: 갤럭시 플래그십 AP(Cortex-X4 / A720 + NPU) 기준 **$\approx 3.6\text{ms}$**.

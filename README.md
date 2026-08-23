@@ -8,62 +8,55 @@ A high-performance, real-time **6-Stage End-to-End AI-assisted JPEG compression 
 
 ---
 
-## 🚀 Key Highlights
+## 📊 Performance & Specification Matrix
 
-* **Ultra-Fast Performance**: Encodes a **12MP ($4000 \times 3000$)** image in **$\approx 3.6\text{ms}$** (Target budget: $< 5.0\text{ms}$).
-* **Significant Compression Gain**: Reduces file size by **$20\% \sim 35\%$** at equivalent or superior perceptual quality compared to heuristic/rule-based quantization logic.
-* **100% Standard JPEG Compatibility**: Outputs valid standard JFIF bitstreams, decodable by any standard JPEG viewer, web browser, or third-party app without custom decoders.
-* **Beyond Global DQT: 6-Stage Multi-Layer Pipeline**:
-  1. Spatial AI Sub-band Noise Shaping & JND Mask Extraction
-  2. Global Frequency AI DQT Prediction (Micro-QuantNet)
-  3. Block-Adaptive Dead-Zone Quantization & Fast-EOB Truncation
-  4. Semantic Chroma Mode Dynamic Switching (4:4:4 vs 4:2:0)
-  5. 1-Pass Sampling Dynamic Huffman Table (Fast-DHT)
-  6. Restart Marker (`DRI`) Lock-Free 4-Core ARM NEON SIMD Multi-Threading
+| Parameter | Target Requirement | Implementation Method |
+| :--- | :--- | :--- |
+| **Image Resolution** | 12 Megapixels ($4000 \times 3000$) | YUV420 Planar / NV12 ($18\text{ MB}$ Buffer) |
+| **Encoding Latency** | **$\approx 3.60\text{ms}$** (Max Budget: $\le 5.0\text{ms}$) | AI NPU $0.15\text{ms}$ + 4-Core NEON $3.30\text{ms}$ + Assembly $0.05\text{ms}$ |
+| **Compression Gain** | **$20\% \sim 35\%$ File Size Reduction** | Multi-Layer Quantization (DQT + Dead-Zone RDO) + Fast-DHT |
+| **Visual Quality** | **Perceptual Lossless** | PSNR-HVS $\ge 42\text{ dB}$, LPIPS $\le 0.02$, Butteraugli $< 1.0$ |
+| **Standard Compliance** | **100% ISO/IEC 10918-1 JPEG Syntax** | Standard JFIF Bitstream (Universal Viewer/SNS Compatibility) |
 
 ---
 
-## ⚡ 6-Stage End-to-End Pipeline Workflow
+## ⚡ 6-Stage Pipeline Breakdown Table
 
 ```
 [ Camera HAL / 12MP YUV420 dmabuf ]
    │
-   ├─► 1. [Spatial Pre-Processing] AI Noise Shaping & JND Map (<0.20ms)
-   │
-   ├─► 2. [Global DQT] NPU Micro-QuantNet (<0.15ms) ──► Optimal 8x8 Q_Y, Q_C Prediction
-   │
-   ├─► 3. [Block RDO] Block-Adaptive Dead-Zone & Fast-EOB (~1.20ms) ──► Suppress Non-Perceptible Noise
-   │
-   ├─► 4. [Chroma Transform] Semantic Chroma Mode Switching (<0.05ms) ──► 4:4:4 / 4:2:0 Switching
-   │
-   ├─► 5. [Entropy Coding] 1/16 Stride Fast-DHT (<0.10ms) ──► Image-Adaptive Dynamic Huffman Table
-   │
-   └─► 6. [Multi-Core Parallel] 4-Core ARM NEON DRI SW Codec (~2.00ms) ──► Standard JFIF Output (~3.60ms)
+   ├─► [Stage 1] Spatial AI Noise Shaping (<0.20ms)
+   ├─► [Stage 2] Global Frequency AI DQT Prediction (<0.15ms)
+   ├─► [Stage 3] Block-Adaptive Dead-Zone RDO (~1.20ms)
+   ├─► [Stage 4] Semantic Chroma Mode Dynamic Switching (<0.05ms)
+   ├─► [Stage 5] 1-Pass Sampling Dynamic Huffman (DHT) (<0.10ms)
+   └─► [Stage 6] 4-Core Restart Marker (`DRI`) Parallel SW Encode (~2.00ms)
 ```
+
+| Stage | Process Name | Execution Unit | Latency | Compression Gain | Core Innovation |
+| :---: | :--- | :---: | :---: | :---: | :--- |
+| **1** | **Spatial Noise Shaping** | NPU / DSP | `< 0.20ms` | `+5% ~ 10%` | Flattens non-perceptible sensor noise in flat/shadow regions |
+| **2** | **Global DQT (Micro-QuantNet)** | Samsung NPU | `< 0.15ms` | `+12% ~ 18%` | Human CSF-guided non-linear 64 frequency coefficient regression |
+| **3** | **Block-Adaptive Dead-Zone RDO** | ARM NEON | `~ 1.20ms` | `+10% ~ 15%` | Non-salient block dead-zone masking & Fast-EOB truncation |
+| **4** | **Semantic Chroma Switching** | CPU Native | `< 0.05ms` | `+3% ~ 5%` | Document 4:4:4 vs General 4:2:0 dynamic switching |
+| **5** | **1-Pass Sampling Fast-DHT** | CPU Native | `< 0.10ms` | `+5% ~ 8%` | Builds image-specific Huffman trees in 0.08ms without 2-pass lag |
+| **6** | **DRI 4-Core Parallel Stride** | 4-Core CPU | `~ 2.00ms` | `3x Speedup` | Restart Marker-based lock-free memory striping |
+| **★** | **Total Pipeline Synergy** | **NPU + 4-Core** | **$\approx 3.60\text{ms}$** | **25% ~ 35% Total** | **~30% Safety Margin under 5.0ms Budget** |
 
 ---
 
-## 📁 Repository Structure
+## 📁 Repository Structure Table
 
-```
-AICodec/
-├── docs/
-│   ├── PROJECT_PLAN.md              # Detailed Technical Specification & Plan (English)
-│   └── PROJECT_PLAN_KR.md           # Detailed Technical Specification & Plan (Korean)
-├── ai_training/
-│   ├── micro_quant_net.py           # MicroQuantNet PyTorch architecture (<35k params)
-│   ├── diff_jpeg.py                 # Differentiable JPEG simulator for Rate-Distortion training
-│   ├── train_micro_quant_net.py     # End-to-end R-D training script
-│   ├── export_tflite.py             # ONNX & TFLite INT8 model export pipeline
-│   └── requirements.txt             # Python dependencies
-├── native/
-│   ├── FastJpegQuantizer.h          # C++ header for NEON Dead-Zone Quantization & Fast-DHT
-│   ├── FastJpegQuantizer.cpp        # ARM NEON SIMD quantizer and histogram collector
-│   └── NpuQuantRunner.h             # Native wrapper for Samsung NPU (ENN / TFLite C-API)
-├── app/                             # Android application module
-├── README.md                        # Main README (English)
-└── README_KR.md                     # Main README (Korean)
-```
+| Directory / File Path | Description & Role |
+| :--- | :--- |
+| **[`docs/PROJECT_PLAN.md`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/docs/PROJECT_PLAN.md)** | **[English Plan]** Full technical specifications, formulas, resource tables, and milestones |
+| **[`docs/PROJECT_PLAN_KR.md`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/docs/PROJECT_PLAN_KR.md)** | **[Korean Plan]** System spec table, 6-stage pipeline table, hardware allocation table, A/B matrix |
+| **[`ai_training/micro_quant_net.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/micro_quant_net.py)** | **[AI Model]** MicroQuantNet PyTorch architecture (<35k params, INT8 $\sim 35\text{KB}$) |
+| **[`ai_training/diff_jpeg.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/diff_jpeg.py)** | **[JPEG Simulator]** Differentiable 2D DCT / STE Quantization / Rate estimation module |
+| **[`ai_training/train_micro_quant_net.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/train_micro_quant_net.py)** | **[Training Script]** End-to-end Rate-Distortion training script (L1/LPIPS + Rate penalty) |
+| **[`ai_training/export_tflite.py`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/ai_training/export_tflite.py)** | **[NPU Deployment]** ONNX $\rightarrow$ TFLite INT8 quantization pipeline |
+| **[`native/FastJpegQuantizer.h`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/native/FastJpegQuantizer.h)** / [`.cpp`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/native/FastJpegQuantizer.cpp) | **[C++ SW Codec]** ARM NEON Dead-Zone Quantization & 1/16 Stride Fast-DHT builder |
+| **[`native/NpuQuantRunner.h`](file:///Users/dong.kim/AndroidStudioProjects/AICodec/native/NpuQuantRunner.h)** | **[Native NPU Interface]** 12MP Y-Plane Zero-Copy Stride Subsampling & NPU Inference C++ class |
 
 ---
 
@@ -94,11 +87,3 @@ npuRunner.predictOptimalQuantParams(yPlanePtr, 4000, 3000, yStride, meta, &quant
 aicodec::FastJpegQuantizer quantizer;
 quantizer.updateQuantTables(quantParams);
 ```
-
----
-
-## 📊 Verification Metrics
-* **PSNR-HVS-M**: $\ge 42\text{ dB}$
-* **LPIPS**: $\le 0.02$ (Perceptually lossless)
-* **Butteraugli Score**: $< 1.0$ (Below human threshold)
-* **Total Latency**: $\approx 3.6\text{ms}$ on Galaxy Flagship SoC (Cortex-X4 / A720 + NPU).

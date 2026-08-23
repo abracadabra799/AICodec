@@ -1,87 +1,101 @@
-# Samsung Galaxy Camera Real-Time AI JPEG Compression Solution Plan
-**Target**: 12MP Image Encoding $\le 5\text{ms}$ | **Visual Quality**: Perceptual Lossless (PSNR-HVS / LPIPS) | **Platform**: Samsung Galaxy (Exynos / Snapdragon)
+# Samsung Galaxy Real-Time 6-Stage AI JPEG Compression Solution Plan
 
 ---
 
-## 1. Executive Summary & Problem Formulation
+## 1. System Specifications & Constraint Summary
 
-### 1.1 Beyond Simple DQT Table Optimization
-* **12MP High Throughput**: $4000 \times 3000$ resolution YUV420 buffer ($18\text{ MB}$) requires $\ge 2.4\text{ Gigapixels/s}$ throughput.
-* **Core Philosophy**: A global DQT table prediction is only one facet (~25-30%) of compression efficiency. True breakthrough requires a **6-Stage End-to-End Multi-Layer Optimization Pipeline** covering spatial pre-processing, global DQT, block-level adaptive quantization, chroma mode switching, fast entropy coding, and lock-free multi-core scheduling.
-* **Compatibility**: 100% compliant with ISO/IEC 10918-1 standard JPEG decoders.
+| Parameter | Target Requirement | Technical Solution |
+| :--- | :--- | :--- |
+| **Image Resolution** | 12 Megapixels ($4000 \times 3000$) | YUV420 Planar / NV12 ($18\text{ MB}$ Buffer) |
+| **Latency Budget** | **$\le 5.0\text{ms}$** (Real-Time Camera Pipeline) | AI Inference $\le 0.15\text{ms}$ + 4-Core NEON SW Encode $\le 3.45\text{ms}$ |
+| **Compression Target** | **$20\% \sim 35\%$ File Size Reduction** | Multi-Layer Quantization (DQT + Dead-Zone RDO) + Fast-DHT |
+| **Visual Quality** | **Perceptual Lossless** | PSNR-HVS $\ge 42\text{ dB}$, LPIPS $\le 0.02$, Butteraugli $< 1.0$ |
+| **Standard Compliance** | **100% ISO/IEC 10918-1 JPEG Syntax** | Standard JFIF Bitstream (Universal Compatibility) |
+| **Power & Thermals** | Minimal Thermal Throttling | INT8 NPU Inference + `dmabuf` Zero-Copy Memory Pipeline |
 
 ---
 
-## 2. 6-Stage End-to-End Pipeline Architecture
+## 2. 6-Stage End-to-End Pipeline Breakdown Table
 
 ```
-[ 12MP YUV420 Input Buffer (AHardwareBuffer / dmabuf Zero-Copy) ]
+[ Camera HAL / 12MP YUV420 dmabuf ]
    │
-   ├─► ① [Spatial Domain] AI-Guided Sub-band Noise Shaping & JND Map (<0.20ms)
-   │     - Pre-conditions non-salient flat regions to suppress high-frequency noise AC energy
-   │
-   ├─► ② [Global Frequency] AI Micro-QuantNet: Optimal DQT Prediction (<0.15ms)
-   │     - Regresses 64-element Q_Y, Q_C matrices using human CSF modeling on NPU
-   │
-   ├─► ③ [Block-Level RDO] AI Block-Adaptive Dead-Zone & Fast Trellis RDO (~1.20ms)
-   │     - ★ [Core Innovation] Encoder decisions without violating standard JPEG decoder syntax!
-   │     - Edge / Face blocks: 100% fine detail retention
-   │     - Background / Bokeh blocks: Adaptive Dead-Zone masks out noise coefficients
-   │     - Fast-EOB: Early truncation of isolated high-frequency AC coefficients
-   │
-   ├─► ④ [Transform Domain] Semantic Chroma Mode Dynamic Switching (<0.05ms)
-   │     - Text / Documents: 4:4:4 or 4:2:2 switching (eliminates color bleeding)
-   │     - Landscapes / Portraits: 4:2:0 with high-frequency chroma attenuation
-   │
-   ├─► ⑤ [Entropy Coding] 1-Pass Sampling Dynamic Huffman Table (DHT) (<0.10ms)
-   │     - Replaces static 1992 tables with 1/16 block sampled custom DHT (<0.08ms)
-   │
-   └─► ⑥ [Parallel Engine] Restart Marker (`DRI`) Lock-Free 4-Core NEON SIMD (~2.00ms)
-         - 4 independent bands across Cortex-X and Cortex-A cores with O(1) memory assembly
-   ────────────────────────────────────────────────────────────────────────────────
-   ★ Total Pipeline Latency: ~3.60ms (< 5.0ms) | File Size Reduction: 25% ~ 35%
+   ├─► [Stage 1] Spatial AI Noise Shaping (<0.20ms)
+   ├─► [Stage 2] Global Frequency AI DQT Prediction (<0.15ms)
+   ├─► [Stage 3] Block-Adaptive Dead-Zone RDO (~1.20ms)
+   ├─► [Stage 4] Semantic Chroma Mode Dynamic Switching (<0.05ms)
+   ├─► [Stage 5] 1-Pass Sampling Dynamic Huffman (DHT) (<0.10ms)
+   └─► [Stage 6] 4-Core Restart Marker (`DRI`) Parallel SW Encode (~2.00ms)
 ```
 
----
-
-## 3. Detailed Component Analysis
-
-### 3.1 [Stage 1] AI-Guided Sub-band Noise Shaping (Spatial Domain)
-High-frequency sensor noise produces enormous high-frequency AC energy in 8x8 DCT bins. Combining edge-preserving gradient filtering with low-res JND maps flattens non-perceptible noise in flat/shadow regions while keeping edges razor-sharp.
-
-### 3.2 [Stage 2] AI Micro-QuantNet (Global DQT Regression)
-An ultra-compact ($<35\text{KB}$ INT8, $<32\text{k}$ params) neural network running on Samsung NPU in **$0.12\text{ms} \sim 0.15\text{ms}$**, regressing the optimal 64-byte $Q_Y$ and $Q_C$ matrices based on scene frequency analysis and camera metadata (ISO, Exposure, ROI).
-
-### 3.3 [Stage 3] Block-Adaptive Dead-Zone & Fast Trellis RDO (Block Quantization)
-Standard decoders only perform `Deq = Q * Coeff`. The encoder has full freedom to decide quantization roundoff:
-* **Adaptive Dead-Zone**: Zeroes out coefficients below the block's visual threshold, massively extending Huffman zero run-lengths.
-* **Fast-EOB (End-of-Block) Truncation**: Truncates isolated trailing $\pm 1$ coefficients at the end of the zigzag scan, saving 10~20 bits per block.
-
-### 3.4 [Stage 4] Semantic Chroma Mode Dynamic Switching
-Dynamic switching between 4:4:4 (for text/document captures to avoid color fringing) and 4:2:0 (for general photography).
-
-### 3.5 [Stage 5] 1-Pass Sampling Dynamic Huffman Table (Fast-DHT)
-Samples 6.25% of blocks ($1/16$ stride) across 12MP to construct custom Huffman trees in $<0.08\text{ms}$, avoiding the 1.5ms overhead of full 2-pass scans.
-
-### 3.6 [Stage 6] Restart Marker (`DRI`) Lock-Free 4-Core SIMD Multi-Threading
-Splits 12MP (188 MCU rows) into 4 bands processed concurrently on Cortex-X4 and A720 cores without lock contention, stitched via $O(1)$ memory pointers.
+| Stage | Process Name | Execution Unit | Input / Output | Latency | Compression Gain | Core Innovation |
+| :---: | :--- | :---: | :--- | :---: | :---: | :--- |
+| **1** | **Spatial Noise Shaping** | NPU / DSP | **In**: 12MP YUV<br>**Out**: Conditioned YUV | `< 0.20ms` | `+5% ~ 10%` | Flattens non-perceptible sensor noise in flat/shadow regions |
+| **2** | **Global DQT (Micro-QuantNet)** | Samsung NPU | **In**: 256x192 + Meta<br>**Out**: 64B $Q_Y, Q_C$ | `< 0.15ms` | `+12% ~ 18%` | Human CSF-guided non-linear 64 frequency coefficient regression |
+| **3** | **Block-Adaptive Dead-Zone RDO** | ARM NEON | **In**: 8x8 DCT coeffs<br>**Out**: Quantized coeffs | `~ 1.20ms` | `+10% ~ 15%` | Non-salient block dead-zone masking & Fast-EOB truncation |
+| **4** | **Semantic Chroma Switching** | CPU Native | **In**: Scene Tag<br>**Out**: Subsampling mode | `< 0.05ms` | `+3% ~ 5%` | Document 4:4:4 vs General 4:2:0 dynamic switching |
+| **5** | **1-Pass Sampling Fast-DHT** | CPU Native | **In**: 1/16 Histogram<br>**Out**: Custom DHT | `< 0.10ms` | `+5% ~ 8%` | Builds image-specific Huffman trees in 0.08ms without 2-pass lag |
+| **6** | **DRI 4-Core Parallel Stride** | 4-Core CPU | **In**: 4 MCU bands<br>**Out**: Standard JFIF | `~ 2.00ms` | `3x Speedup` | Restart Marker-based lock-free memory striping |
+| **★** | **Total Pipeline Synergy** | **NPU + 4-Core** | **12MP YUV $\rightarrow$ JPEG** | **$\approx 3.60\text{ms}$** | **25% ~ 35% Total** | **~30% Safety Margin under 5.0ms Budget** |
 
 ---
 
-## 4. Component Contribution Matrix (Ablation Analysis)
+## 3. Heuristic DQT vs Proposed 6-Stage AI Solution Comparison Table
 
-| Optimization Technique | Pipeline Stage | Compression Gain | Processing Latency | Standard Compliance |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. AI Micro-QuantNet (DQT)** | Global Frequency Quantization | **+12% ~ 18%** | 0.15ms (NPU) | 100% |
-| **2. Block-Adaptive Dead-Zone & Fast EOB** | Block-Level RDO Quantization | **+10% ~ 15%** | 0.00ms (Folded in NEON) | 100% |
-| **3. 1-Pass Sampling Dynamic Huffman (DHT)** | Entropy Coding | **+5% ~ 8%** | 0.10ms (CPU) | 100% |
-| **4. AI Noise Shaping** | Spatial Pre-Processing | **+5% ~ 10%** | 0.20ms (NPU/NEON) | 100% |
-| **5. DRI 4-Core Lock-Free SIMD** | Multi-Core Scheduling | **3x Encoding Speedup** | Total ~3.30ms achieved | 100% |
-| **★ Total Pipeline Synergy** | **End-to-End Pipeline** | **25% ~ 35% Total Reduction** | **~3.60ms Total (<5ms)** | **100% Standard JPEG** |
+| Evaluation Aspect | Existing Heuristic DQT | Proposed 6-Stage Solution (`AICodec`) |
+| :--- | :--- | :--- |
+| **Quantization Mechanism** | Static/Linear single table per image | **AI Global DQT + Block-Adaptive Dead-Zone RDO** |
+| **Sensor Noise Handling** | High-frequency noise wastes AC bitstream bits | **Spatial AI Noise Shaping flattens noise before DCT** |
+| **Huffman Coding** | Generic 1992 static tables (Annex K) | **1/16 Stride Fast 1-Pass Dynamic Huffman (DHT)** |
+| **Rate-Distortion Optimization** | None (Basic division & rounding) | **Fast-EOB early termination (Saves 10~20 bits/block)** |
+| **Multi-Threading Model** | Possible mutex lock overhead | **Restart Marker (`DRI`) 100% Lock-Free Parallelism** |
+| **File Size (Same Quality)** | Baseline ($100\%$) | **$65\% \sim 75\%$ ($25\% \sim 35\%$ File Size Reduction)** |
+| **Execution Latency (12MP)** | $\approx 4.5\text{ms} \sim 6.0\text{ms}$ | **$\approx 3.60\text{ms}$ (Strictly under 5.0ms)** |
 
 ---
 
-## 5. Verification & Benchmark Plan
+## 4. Hardware Resource Allocation & Scheduling Table
 
-* **Dataset (1,000+ images)**: High-ISO Night, Portraits, Fine Foliage & Text, Gradients (Sky/Walls).
-* **Metrics**: BD-Rate, LPIPS ($\le 0.02$), PSNR-HVS-M ($\ge 42\text{ dB}$), Butteraugli Score ($< 1.0$), Encoding Latency ($< 5\text{ms}$).
+| Core / Accelerator | Assigned Workload | Optimization Technique | Latency |
+| :--- | :--- | :--- | :---: |
+| **Samsung NPU** | Micro-QuantNet Inference | INT8 Quantized, Zero-Copy Stride Memory Binding | `0.15ms` |
+| **Cortex-X4 (Prime)** | MCU Row 0 ~ 46 + DHT Generation | NEON SIMD + Sampling Fast-DHT | `3.30ms` |
+| **Cortex-A720 #1 (Gold)** | MCU Row 47 ~ 93 Encoding | NEON SIMD Dead-Zone Quantization | `3.20ms` |
+| **Cortex-A720 #2 (Gold)** | MCU Row 94 ~ 140 Encoding | NEON SIMD Dead-Zone Quantization | `3.20ms` |
+| **Cortex-A720 #3 (Gold)** | MCU Row 141 ~ 187 Encoding | NEON SIMD Dead-Zone Quantization | `3.20ms` |
+| **Main Thread** | JFIF Header Assembly & Packaging | $O(1)$ Pointer Linking (Minimal `memcpy`) | `0.05ms` |
+
+---
+
+## 5. Verification & Benchmark Matrix
+
+### 5.1 Stratified Test Dataset (1,000+ Images)
+
+| Scene Category | Key Characteristics | Primary Verification Focus | Target Metric |
+| :--- | :--- | :--- | :--- |
+| **High-ISO Night** | $\text{ISO} \ge 1600$, Shadow noise | Noise reduction vs shadow detail preservation | PSNR-HVS $\ge 40\text{ dB}$ |
+| **Portraits / Selfies** | Skin tones, eyes, fine hair | Facial texture retention, background bokeh compression | LPIPS $\le 0.015$ |
+| **Landscapes / Nature** | Foliage, grass, fine texture | Leaf detail preservation, edge ringing suppression | MS-SSIM $\ge 0.985$ |
+| **Documents / Text** | Receipts, signs, character edges | Character legibility, chroma bleeding prevention | Butteraugli $< 0.8$ |
+| **Gradients (Sky/Walls)** | Uniform color regions | Color banding (blocking) artifact prevention | PSNR $\ge 44\text{ dB}$ |
+
+### 5.2 Objective Metric Thresholds
+
+| Metric | Description | Target Threshold |
+| :--- | :--- | :--- |
+| **BD-Rate (Size Reduction)** | Bitrate reduction at equivalent perceptual visual quality | **$\ge 25.0\%$ Reduction** |
+| **LPIPS** | Deep perceptual visual distance metric | **$\le 0.020$** (Humanly indistinguishable) |
+| **PSNR-HVS-M** | Human Visual System & Masking PSNR | **$\ge 42.0\text{ dB}$** |
+| **Butteraugli Score** | Google visual distortion perception threshold | **$< 1.0$** (Strictly below human perception threshold) |
+| **End-to-End Latency** | 12MP YUV input to standard JPEG completion | **$\le 4.5\text{ms}$** (Safety margin below 5.0ms) |
+
+---
+
+## 6. Implementation Roadmap & Milestone Schedule
+
+| Phase | Duration | Core Tasks | Deliverables | Success Criteria |
+| :---: | :---: | :--- | :--- | :--- |
+| **Phase 1** | Weeks 1-2 | PyTorch MicroQuantNet & Differentiable JPEG | `micro_quant_net.pth`, R-D loss | BD-Rate gain $\ge 20\%$ |
+| **Phase 2** | Weeks 3-4 | ONNX $\rightarrow$ TFLite INT8 & NPU Porting | `micro_quant_net_int8.tflite`, C++ Runner | NPU Latency $\le 0.15\text{ms}$ |
+| **Phase 3** | Weeks 5-6 | SW Codec Integration (NEON Dead-Zone & DHT) | `FastJpegQuantizer.cpp`, DRI pipeline | 4-Core SW Latency $\le 3.45\text{ms}$ |
+| **Phase 4** | Weeks 7-8 | On-Device A/B Benchmark (1,000 images) & QA | Final Benchmark Report, Release Binary | 12MP $\le 5\text{ms}$, 25~35% Size Gain |
